@@ -27,6 +27,15 @@ public class AIService {
         String prompt = "Hãy phân tích nội dung sau và trích xuất ra danh sách câu hỏi trắc nghiệm cùng các đáp án. Mỗi câu hỏi là một object JSON gồm: 'content' (nội dung câu hỏi), 'options' (mảng các đáp án, mỗi đáp án gồm 'content' và 'correct' true/false). Chỉ trả về JSON dạng: [{\"content\":\"...\",\"options\":[{\"content\":\"...\",\"correct\":true/false}, ...]}, ...]. Không thêm mô tả nào khác. Nội dung: " + text;
         String aiResult = ask(prompt);
         try {
+            aiResult = aiResult.trim();
+            if (aiResult.startsWith("```")) {
+                aiResult = aiResult.replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```\\s*$", "");
+            }
+            int start = aiResult.indexOf('[');
+            int end = aiResult.lastIndexOf(']');
+            if (start >= 0 && end > start) {
+                aiResult = aiResult.substring(start, end + 1);
+            }
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             com.smartcard.backend.dto.AIExamQuestionDTO[] questions = mapper.readValue(aiResult, com.smartcard.backend.dto.AIExamQuestionDTO[].class);
             return java.util.Arrays.asList(questions);
