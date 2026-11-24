@@ -14,6 +14,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.Base64;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClientException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartcard.backend.entity.Flashcard;
@@ -23,9 +24,20 @@ import java.util.List;
 
 @Service
 public class AIService {
+    private volatile String lastAnalysisError;
+
+    public String getLastAnalysisError() {
+        return lastAnalysisError;
+    }
+
     public List<com.smartcard.backend.dto.AIExamQuestionDTO> analyzeExamQuestions(String text) {
+        lastAnalysisError = null;
         String prompt = "Hãy phân tích nội dung sau và trích xuất ra danh sách câu hỏi trắc nghiệm cùng các đáp án. Mỗi câu hỏi là một object JSON gồm: 'content' (nội dung câu hỏi), 'options' (mảng các đáp án, mỗi đáp án gồm 'content' và 'correct' true/false). Chỉ trả về JSON dạng: [{\"content\":\"...\",\"options\":[{\"content\":\"...\",\"correct\":true/false}, ...]}, ...]. Không thêm mô tả nào khác. Nội dung: " + text;
         String aiResult = ask(prompt);
+        if (aiResult != null && aiResult.startsWith("❌")) {
+            lastAnalysisError = aiResult;
+            return java.util.Collections.emptyList();
+        }
         try {
             aiResult = aiResult.trim();
             if (aiResult.startsWith("```")) {
@@ -40,7 +52,7 @@ public class AIService {
             com.smartcard.backend.dto.AIExamQuestionDTO[] questions = mapper.readValue(aiResult, com.smartcard.backend.dto.AIExamQuestionDTO[].class);
             return java.util.Arrays.asList(questions);
         } catch (Exception e) {
-            e.printStackTrace();
+            lastAnalysisError = "AI trả dữ liệu không đúng định dạng JSON: " + e.getMessage();
             return java.util.Collections.emptyList();
         }
     }
@@ -48,16 +60,35 @@ public class AIService {
     @Value("${openrouter.api-key}")
     private String apiKey;
 
+    @Value("${openrouter.model:openrouter/free}")
+    private String openRouterModel;
+
     private final String API_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+    public boolean isConfigured() {
+        return apiKey != null && !apiKey.trim().isEmpty()
+                && !apiKey.trim().equalsIgnoreCase("Bearer");
+    }
+
+    private String getAuthorizationHeader() {
+        String key = apiKey == null ? "" : apiKey.trim();
+        if (key.isEmpty()) {
+            return "";
+        }
+        return key.regionMatches(true, 0, "Bearer ", 0, 7) ? key : "Bearer " + key;
+    }
 
     public String ask(String prompt) {
         try {
+            if (!isConfigured()) {
+                return "❌ Thiếu OPENROUTER_API_KEY";
+            }
             RestTemplate restTemplate = new RestTemplate();
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("Authorization", apiKey); // lấy từ application.properties
-            headers.set("HTTP-Referer", "http://localhost:8088");
+            headers.set("Authorization", getAuthorizationHeader());
+            headers.set("HTTP-Referer", "http://localhost:5173");
 
             JSONObject userMessage = new JSONObject();
             userMessage.put("role", "user");
@@ -66,7 +97,7 @@ public class AIService {
             JSONArray messages = new JSONArray().put(userMessage);
 
             JSONObject requestBody = new JSONObject();
-            requestBody.put("model", "mistralai/mistral-7b-instruct:free");
+            requestBody.put("model", openRouterModel);
             requestBody.put("messages", messages); // BỔ SUNG DÒNG NÀY
 
             HttpEntity<String> request = new HttpEntity<>(requestBody.toString(), headers);
@@ -82,6 +113,11 @@ public class AIService {
             } else {
                 return "❌ Lỗi API: " + response.getStatusCode() + " - " + response.getBody();
             }
+        } catch (HttpClientErrorException e) {
+            return "❌ Lỗi OpenRouter " + e.getStatusCode().value() + ": "
+                    + e.getResponseBodyAsString();
+        } catch (RestClientException e) {
+            return "❌ Không kết nối được OpenRouter: " + e.getMessage();
         } catch (Exception e) {
             return "❌ Lỗi ngoại lệ: " + e.getMessage();
         }

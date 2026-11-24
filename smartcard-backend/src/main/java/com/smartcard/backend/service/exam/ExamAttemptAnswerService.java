@@ -18,8 +18,10 @@ public class ExamAttemptAnswerService {
     }
 
     public List<ExamAttemptAnswer> getAnswersByAttempt(ExamAttempt attempt) {
-        return examAttemptAnswerRepository.findAll().stream()
-                .filter(a -> a.getAttempt().getId().equals(attempt.getId()))
-                .toList();
+        return examAttemptAnswerRepository.findByAttempt_Id(attempt.getId());
+    }
+
+    public void deleteAnswersByAttempt(ExamAttempt attempt) {
+        examAttemptAnswerRepository.deleteByAttempt_Id(attempt.getId());
     }
 }

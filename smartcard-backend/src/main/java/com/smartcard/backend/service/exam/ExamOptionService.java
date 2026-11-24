@@ -19,9 +19,7 @@ public class ExamOptionService {
     }
 
     public List<ExamOption> getOptionsByQuestion(ExamQuestion question) {
-        return examOptionRepository.findAll().stream()
-                .filter(o -> o.getQuestion().getId().equals(question.getId()))
-                .toList();
+        return examOptionRepository.findByQuestion_Id(question.getId());
     }
 
     public Optional<ExamOption> getById(Long id) {

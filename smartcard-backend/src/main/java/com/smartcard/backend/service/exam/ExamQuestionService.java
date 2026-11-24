@@ -30,9 +30,7 @@ public class ExamQuestionService {
     }
 
     public List<ExamQuestion> getQuestionsByExam(Exam exam) {
-        return examQuestionRepository.findAll().stream()
-                .filter(q -> q.getExam().getId().equals(exam.getId()))
-                .toList();
+        return examQuestionRepository.findByExam_IdOrderByQuestionOrderAsc(exam.getId());
     }
 
     public Optional<ExamQuestion> getById(Long id) {
