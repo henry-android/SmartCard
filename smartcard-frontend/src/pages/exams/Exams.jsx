@@ -19,8 +19,14 @@ export default function Exams() {
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0)
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   const [submissionResult, setSubmissionResult] = useState(null)
+  const [resultAttemptMeta, setResultAttemptMeta] = useState(null)
   const [submissionError, setSubmissionError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [historyExam, setHistoryExam] = useState(null)
+  const [attemptHistory, setAttemptHistory] = useState([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [openingHistoryResult, setOpeningHistoryResult] = useState(false)
   const [message, setMessage] = useState('')
   const [creating, setCreating] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -126,11 +132,43 @@ export default function Exams() {
       setActiveQuestionIndex(0)
       setRemainingSeconds(data.duration * 60)
       setSubmissionResult(null)
+      setResultAttemptMeta(null)
       setSubmissionError('')
       setSubmitting(false)
       autoSubmitTriggered.current = false
     } catch (error) {
       setMessage(error.response?.data?.message || 'Không thể bắt đầu bài kiểm tra.')
+    }
+  }
+
+  const viewHistory = async (exam) => {
+    setHistoryExam(exam)
+    setAttemptHistory([])
+    setHistoryError('')
+    setLoadingHistory(true)
+    try {
+      const { data } = await examService.getMyHistory(exam.id)
+      setAttemptHistory(Array.isArray(data) ? data : [])
+    } catch (error) {
+      setHistoryError(error.response?.data?.message || 'Không thể tải lịch sử làm bài.')
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  const viewPastResult = async (attempt) => {
+    setOpeningHistoryResult(true)
+    setHistoryError('')
+    try {
+      const { data } = await examService.getAttemptResult(attempt.attemptId)
+      setHistoryExam(null)
+      setTakingExam({ title: data.examTitle, totalQuestions: data.totalQuestions })
+      setSubmissionResult(data)
+      setResultAttemptMeta(attempt)
+    } catch (error) {
+      setHistoryError(error.response?.data?.message || 'Không thể mở kết quả lượt làm này.')
+    } finally {
+      setOpeningHistoryResult(false)
     }
   }
 
@@ -181,6 +219,16 @@ export default function Exams() {
     return `${String(minutes).padStart(2, '0')}:${String(remaining).padStart(2, '0')}`
   }
 
+  const formatDurationText = (seconds) => {
+    const minutes = Math.floor(seconds / 60)
+    const remaining = seconds % 60
+    return minutes ? `${minutes} phút ${remaining} giây` : `${remaining} giây`
+  }
+
+  const formatDateTime = (value) => value
+    ? new Date(value).toLocaleString('vi-VN', { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Không có dữ liệu thời gian'
+
   return (
     <section className="container page">
       <div className="page-header">
@@ -217,6 +265,11 @@ export default function Exams() {
                       setFile(null)
                     }}>AI Import file</button>
                   </div>
+                )}
+                {user && (
+                  <button className="btn ghost exam-history-button" type="button" onClick={() => viewHistory(exam)}>
+                    Lịch sử làm bài
+                  </button>
                 )}
               </div>
             </article>
@@ -306,14 +359,65 @@ export default function Exams() {
         </div>
       )}
 
+      {historyExam && (
+        <div className="modal-backdrop" onMouseDown={() => setHistoryExam(null)}>
+          <section className="modal exam-history-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="exam-history-header">
+              <div>
+                <p className="eyebrow dark">LỊCH SỬ CÁ NHÂN</p>
+                <h2>{historyExam.title}</h2>
+                <p>Các lượt làm bài đã nộp</p>
+              </div>
+              <button className="btn ghost" type="button" onClick={() => setHistoryExam(null)}>Đóng</button>
+            </header>
+            {historyError && <p className="alert error">{historyError}</p>}
+            {loadingHistory ? <div className="empty history-empty">Đang tải lịch sử...</div> : attemptHistory.length ? (
+              <ol className="attempt-history-list">
+                {[...attemptHistory].reverse().map((attempt) => (
+                  <li key={attempt.attemptId}>
+                    <div className="attempt-history-number">#{attempt.attemptNumber}</div>
+                    <div className="attempt-history-info">
+                      <strong>Lượt {attempt.attemptNumber}</strong>
+                      <span>Bắt đầu lúc {formatDateTime(attempt.startedAt)}</span>
+                      <span>Nộp lúc {formatDateTime(attempt.submittedAt)}</span>
+                      <span>Thời gian làm: {formatDurationText(attempt.timeSpentSeconds)}</span>
+                    </div>
+                    <div className="attempt-history-score">
+                      <strong>{attempt.score}/{attempt.totalQuestions}</strong>
+                      <span>{attempt.percentage}%</span>
+                    </div>
+                    <button
+                      className="btn primary"
+                      type="button"
+                      disabled={openingHistoryResult}
+                      onClick={() => viewPastResult(attempt)}
+                    >{openingHistoryResult ? 'Đang mở...' : 'Xem bài làm'}</button>
+                  </li>
+                ))}
+              </ol>
+            ) : !historyError && (
+              <div className="empty history-empty">
+                <h3>Chưa có lượt làm bài</h3>
+                <p>Sau khi nộp bài, lịch sử và kết quả sẽ được lưu tại đây.</p>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
       {takingExam && (
         <div className="modal-backdrop exam-take-backdrop" onMouseDown={closeExam}>
           <section className="exam-workspace" onMouseDown={(event) => event.stopPropagation()}>
             <header className="exam-workspace-header">
               <div>
-                <p className="eyebrow dark">BÀI KIỂM TRA</p>
+                <p className="eyebrow dark">{submissionResult ? 'KẾT QUẢ LÀM BÀI' : 'BÀI KIỂM TRA'}</p>
                 <h2>{takingExam.title}</h2>
-                <p>{takingExam.totalQuestions} câu hỏi · Chọn một đáp án cho mỗi câu</p>
+                {submissionResult && resultAttemptMeta ? (
+                  <p>Lượt {resultAttemptMeta.attemptNumber} · Nộp lúc {formatDateTime(resultAttemptMeta.submittedAt)}
+                    · Thời gian làm {formatDurationText(resultAttemptMeta.timeSpentSeconds)}</p>
+                ) : !submissionResult && (
+                  <p>{takingExam.totalQuestions} câu hỏi · Chọn một đáp án cho mỗi câu</p>
+                )}
               </div>
               {!submissionResult && (
                 <div className={`exam-timer ${remainingSeconds < 60 ? 'urgent' : ''}`} aria-live="polite">

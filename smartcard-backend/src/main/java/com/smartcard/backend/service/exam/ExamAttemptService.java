@@ -1,5 +1,6 @@
 package com.smartcard.backend.service.exam;
 
+import com.smartcard.backend.dto.ExamAttemptHistoryDTO;
 import com.smartcard.backend.dto.ExamSubmissionResultDTO;
 import com.smartcard.backend.dto.ExamTakeDTO;
 import com.smartcard.backend.entity.exam.Exam;
@@ -16,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -52,6 +54,8 @@ public class ExamAttemptService {
         ExamAttempt attempt = new ExamAttempt();
         attempt.setExam(exam);
         attempt.setUserId(userId);
+        java.util.List<ExamQuestion> questions = examQuestionService.getQuestionsByExam(exam);
+        attempt.setTotalQuestions(questions.size());
 
         // Đảm bảo thời gian bắt đầu được lưu chính xác với múi giờ Việt Nam
         ZoneId vietnamZone = ZoneId.of("Asia/Ho_Chi_Minh");
@@ -66,7 +70,19 @@ public class ExamAttemptService {
         System.out.println("StartedAt: " + startTime);
         System.out.println("=== END DEBUG ===");
 
-        return Optional.of(examAttemptRepository.save(attempt));
+        ExamAttempt savedAttempt = examAttemptRepository.save(attempt);
+        for (ExamQuestion question : questions) {
+            ExamAttemptAnswer answer = new ExamAttemptAnswer();
+            answer.setAttempt(savedAttempt);
+            answer.setQuestion(question);
+            answer.setCorrectOption(examOptionService.getOptionsByQuestion(question).stream()
+                    .filter(ExamOption::isCorrect)
+                    .findFirst()
+                    .orElse(null));
+            answer.setCorrect(false);
+            examAttemptAnswerService.saveAnswer(answer);
+        }
+        return Optional.of(savedAttempt);
     }
 
     @Transactional
@@ -81,7 +97,19 @@ public class ExamAttemptService {
             return Optional.empty();
         }
 
+        java.util.Map<Long, ExamAttemptAnswer> savedAnswers = examAttemptAnswerService
+                .getAnswersByAttempt(attempt).stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        answer -> answer.getQuestion().getId(),
+                        answer -> answer,
+                        (first, ignored) -> first));
         java.util.List<ExamQuestion> questions = examQuestionService.getQuestionsByExam(attempt.getExam());
+        if (attempt.getTotalQuestions() != null && !savedAnswers.isEmpty()) {
+            questions = questions.stream()
+                    .filter(question -> savedAnswers.containsKey(question.getId()))
+                    .limit(attempt.getTotalQuestions())
+                    .toList();
+        }
         java.util.Map<Long, ExamQuestion> questionsById = questions.stream()
                 .collect(java.util.stream.Collectors.toMap(ExamQuestion::getId, question -> question));
         java.util.Map<Long, ExamOption> selectedOptions = new java.util.HashMap<>();
@@ -98,23 +126,31 @@ public class ExamAttemptService {
             selectedOptions.put(question.getId(), option);
         }
 
-        examAttemptAnswerService.deleteAnswersByAttempt(attempt);
         int correctCount = 0;
         for (ExamQuestion question : questions) {
             ExamOption selectedOption = selectedOptions.get(question.getId());
-            if (selectedOption != null) {
-                boolean correct = selectedOption.isCorrect();
-                if (correct) {
-                    correctCount++;
-                }
-
-                ExamAttemptAnswer attemptAnswer = new ExamAttemptAnswer();
-                attemptAnswer.setAttempt(attempt);
-                attemptAnswer.setQuestion(question);
-                attemptAnswer.setSelectedOption(selectedOption);
-                attemptAnswer.setCorrect(correct);
-                examAttemptAnswerService.saveAnswer(attemptAnswer);
+            ExamAttemptAnswer attemptAnswer = savedAnswers.getOrDefault(
+                    question.getId(),
+                    new ExamAttemptAnswer());
+            ExamOption correctOption = attemptAnswer.getCorrectOption();
+            if (correctOption == null) {
+                correctOption = examOptionService.getOptionsByQuestion(question).stream()
+                        .filter(ExamOption::isCorrect)
+                        .findFirst()
+                        .orElse(null);
             }
+            boolean correct = selectedOption != null && correctOption != null
+                    && selectedOption.getId().equals(correctOption.getId());
+            if (correct) {
+                correctCount++;
+            }
+
+            attemptAnswer.setAttempt(attempt);
+            attemptAnswer.setQuestion(question);
+            attemptAnswer.setSelectedOption(selectedOption);
+            attemptAnswer.setCorrectOption(correctOption);
+            attemptAnswer.setCorrect(correct);
+            examAttemptAnswerService.saveAnswer(attemptAnswer);
         }
         // Đảm bảo thời gian nộp bài được lưu chính xác với múi giờ Việt Nam
         ZoneId vietnamZone = ZoneId.of("Asia/Ho_Chi_Minh");
@@ -154,7 +190,17 @@ public class ExamAttemptService {
         if (exam == null || attempt == null || !exam.getId().equals(attempt.getExam().getId())) {
             return Optional.empty();
         }
-        java.util.List<ExamTakeDTO.Question> questions = examQuestionService.getQuestionsByExam(exam).stream()
+        java.util.Set<Long> questionIds = examAttemptAnswerService.getAnswersByAttempt(attempt).stream()
+                .map(answer -> answer.getQuestion().getId())
+                .collect(java.util.stream.Collectors.toSet());
+        java.util.List<ExamQuestion> attemptQuestions = examQuestionService.getQuestionsByExam(exam);
+        if (attempt.getTotalQuestions() != null && !questionIds.isEmpty()) {
+            attemptQuestions = attemptQuestions.stream()
+                    .filter(question -> questionIds.contains(question.getId()))
+                    .limit(attempt.getTotalQuestions())
+                    .toList();
+        }
+        java.util.List<ExamTakeDTO.Question> questions = attemptQuestions.stream()
                 .map(question -> new ExamTakeDTO.Question(
                         question.getId(),
                         question.getContent(),
@@ -180,6 +226,31 @@ public class ExamAttemptService {
         return Optional.of(buildResult(attempt));
     }
 
+    @Transactional(readOnly = true)
+    public java.util.List<ExamAttemptHistoryDTO> getHistoryForUserAndExam(String userId, Long examId) {
+        java.util.List<ExamAttempt> attempts = examAttemptRepository
+                .findByUserIdAndExam_IdAndSubmittedAtIsNotNullOrderByStartedAtAscIdAsc(userId, examId);
+        return java.util.stream.IntStream.range(0, attempts.size())
+                .mapToObj(index -> {
+                    ExamAttempt attempt = attempts.get(index);
+                    int totalQuestions = attempt.getTotalQuestions() == null
+                            ? attempt.getExam().getTotalQuestions()
+                            : attempt.getTotalQuestions();
+                    double percentage = totalQuestions == 0 ? 0
+                            : Math.round(attempt.getCorrectCount() * 10000.0 / totalQuestions) / 100.0;
+                    return new ExamAttemptHistoryDTO(
+                            attempt.getId(),
+                            index + 1,
+                            attempt.getStartedAt(),
+                            attempt.getSubmittedAt(),
+                            getTimeSpentSeconds(attempt),
+                            attempt.getCorrectCount(),
+                            totalQuestions,
+                            percentage);
+                })
+                .toList();
+    }
+
     private ExamSubmissionResultDTO buildResult(ExamAttempt attempt) {
         java.util.Map<Long, ExamAttemptAnswer> answersByQuestion = examAttemptAnswerService
                 .getAnswersByAttempt(attempt).stream()
@@ -188,15 +259,24 @@ public class ExamAttemptService {
                         answer -> answer,
                         (first, ignored) -> first));
 
-        java.util.List<ExamSubmissionResultDTO.QuestionResult> results = examQuestionService
-                .getQuestionsByExam(attempt.getExam()).stream()
+        java.util.List<ExamQuestion> attemptQuestions = examQuestionService.getQuestionsByExam(attempt.getExam());
+        if (attempt.getTotalQuestions() != null && !answersByQuestion.isEmpty()) {
+            attemptQuestions = attemptQuestions.stream()
+                    .filter(question -> answersByQuestion.containsKey(question.getId()))
+                    .limit(attempt.getTotalQuestions())
+                    .toList();
+        }
+        java.util.List<ExamSubmissionResultDTO.QuestionResult> results = attemptQuestions.stream()
                 .map(question -> {
                     ExamAttemptAnswer answer = answersByQuestion.get(question.getId());
                     ExamOption selected = answer == null ? null : answer.getSelectedOption();
-                    ExamOption correct = examOptionService.getOptionsByQuestion(question).stream()
-                            .filter(ExamOption::isCorrect)
-                            .findFirst()
-                            .orElse(null);
+                    ExamOption correct = answer == null ? null : answer.getCorrectOption();
+                    if (correct == null) {
+                        correct = examOptionService.getOptionsByQuestion(question).stream()
+                                .filter(ExamOption::isCorrect)
+                                .findFirst()
+                                .orElse(null);
+                    }
                     return new ExamSubmissionResultDTO.QuestionResult(
                             question.getId(),
                             question.getContent(),
@@ -207,7 +287,7 @@ public class ExamAttemptService {
                             answer != null && answer.isCorrect());
                 })
                 .toList();
-        int total = results.size();
+        int total = attempt.getTotalQuestions() == null ? results.size() : attempt.getTotalQuestions();
         double percentage = total == 0 ? 0 : Math.round(attempt.getCorrectCount() * 10000.0 / total) / 100.0;
         return new ExamSubmissionResultDTO(
                 attempt.getId(),
@@ -216,6 +296,16 @@ public class ExamAttemptService {
                 total,
                 percentage,
                 results);
+    }
+
+    private long getTimeSpentSeconds(ExamAttempt attempt) {
+        if (attempt.getStartedAt() != null && attempt.getSubmittedAt() != null) {
+            return Math.max(0, Duration.between(attempt.getStartedAt(), attempt.getSubmittedAt()).getSeconds());
+        }
+        if (attempt.getRemainingTime() != null) {
+            return Math.max(0, (attempt.getExam().getDuration() - attempt.getRemainingTime()) * 60L);
+        }
+        return 0;
     }
 
     public java.util.List<ExamAttempt> getAttemptsByExam(Exam exam) {

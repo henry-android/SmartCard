@@ -20,6 +20,7 @@ public class ExamAttempt {
     private int score;
     private int correctCount;
     private Integer remainingTime; // Thời gian còn lại (phút)
+    private Integer totalQuestions;
 
     @OneToMany(mappedBy = "attempt", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
@@ -95,5 +96,13 @@ public class ExamAttempt {
 
     public void setRemainingTime(Integer remainingTime) {
         this.remainingTime = remainingTime;
+    }
+
+    public Integer getTotalQuestions() {
+        return totalQuestions;
+    }
+
+    public void setTotalQuestions(Integer totalQuestions) {
+        this.totalQuestions = totalQuestions;
     }
 }

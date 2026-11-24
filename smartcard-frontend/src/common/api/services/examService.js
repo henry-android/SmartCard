@@ -23,6 +23,7 @@ export const examService = {
     answers,
   ),
   getAttemptResult: (attemptId) => api.get(`/api/exam-attempts/${attemptId}/result`),
+  getMyHistory: (examId) => api.get(`/api/exam-attempts/history/by-exam/${examId}`),
   aiImport: (examId, file) => {
     const formData = new FormData()
     formData.append('file', file)

@@ -61,6 +61,8 @@ public class ExamAttemptAnswerRestController {
         answer.setAttempt(examAttempt);
         answer.setQuestion(examQuestion);
         answer.setSelectedOption(selectedOption);
+        answer.setId(null);
+        answer.setCorrectOption(null);
         answer.setCorrect(selectedOption.isCorrect());
         examAttemptAnswerService.saveAnswer(answer);
         return ResponseEntity.ok(Map.of("message", "Đã lưu câu trả lời."));

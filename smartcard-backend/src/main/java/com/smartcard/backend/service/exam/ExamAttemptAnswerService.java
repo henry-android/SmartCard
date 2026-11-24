@@ -14,14 +14,25 @@ public class ExamAttemptAnswerService {
     private ExamAttemptAnswerRepository examAttemptAnswerRepository;
 
     public ExamAttemptAnswer saveAnswer(ExamAttemptAnswer answer) {
+        if (answer.getId() == null && answer.getAttempt() != null && answer.getQuestion() != null) {
+            ExamAttemptAnswer existing = examAttemptAnswerRepository
+                    .findByAttempt_IdAndQuestion_Id(
+                            answer.getAttempt().getId(),
+                            answer.getQuestion().getId())
+                    .orElse(null);
+            if (existing != null) {
+                existing.setSelectedOption(answer.getSelectedOption());
+                existing.setCorrect(answer.isCorrect());
+                if (answer.getCorrectOption() != null) {
+                    existing.setCorrectOption(answer.getCorrectOption());
+                }
+                answer = existing;
+            }
+        }
         return examAttemptAnswerRepository.save(answer);
     }
 
     public List<ExamAttemptAnswer> getAnswersByAttempt(ExamAttempt attempt) {
         return examAttemptAnswerRepository.findByAttempt_Id(attempt.getId());
-    }
-
-    public void deleteAnswersByAttempt(ExamAttempt attempt) {
-        examAttemptAnswerRepository.deleteByAttempt_Id(attempt.getId());
     }
 }

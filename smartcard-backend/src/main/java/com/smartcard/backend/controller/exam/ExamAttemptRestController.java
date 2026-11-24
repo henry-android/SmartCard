@@ -1,5 +1,6 @@
 package com.smartcard.backend.controller.exam;
 
+import com.smartcard.backend.dto.ExamAttemptHistoryDTO;
 import com.smartcard.backend.dto.ExamSubmissionResultDTO;
 import com.smartcard.backend.dto.ExamTakeDTO;
 import com.smartcard.backend.entity.User;
@@ -26,6 +27,27 @@ public class ExamAttemptRestController {
     private ExamService examService;
     @Autowired
     private ExamQuestionService examQuestionService;
+
+    @GetMapping("/history/by-exam/{examId}")
+    public ResponseEntity<?> getMyExamHistory(@PathVariable Long examId, HttpSession session) {
+        Object sessionUser = session.getAttribute("loggedInUser");
+        if (!(sessionUser instanceof User user)) {
+            return ResponseEntity.status(401).body(Map.of("message", "Bạn cần đăng nhập để xem lịch sử."));
+        }
+
+        Optional<Exam> examOpt = examService.getExamById(examId);
+        if (examOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        Exam exam = examOpt.get();
+        if (!exam.isPublic() && !user.getUsername().equals(exam.getCreatedBy())) {
+            return ResponseEntity.status(403).body(Map.of("message", "Bạn không có quyền xem lịch sử đề thi này."));
+        }
+
+        List<ExamAttemptHistoryDTO> history = examAttemptService
+                .getHistoryForUserAndExam(user.getUsername(), examId);
+        return ResponseEntity.ok(history);
+    }
 
     @PostMapping("/create")
     public ResponseEntity<?> createAttempt(@RequestParam Long examId, HttpSession session) {

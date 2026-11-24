@@ -18,6 +18,9 @@ public class ExamAttemptAnswer {
     @ManyToOne
     @JoinColumn(name = "selected_option_id")
     private ExamOption selectedOption;
+    @ManyToOne
+    @JoinColumn(name = "correct_option_id")
+    private ExamOption correctOption;
     private boolean isCorrect;
     // getter, setter
 
@@ -44,6 +47,12 @@ public class ExamAttemptAnswer {
     }
     public void setSelectedOption(ExamOption selectedOption) {
         this.selectedOption = selectedOption;
+    }
+    public ExamOption getCorrectOption() {
+        return correctOption;
+    }
+    public void setCorrectOption(ExamOption correctOption) {
+        this.correctOption = correctOption;
     }
     public boolean isCorrect() {
         return isCorrect;

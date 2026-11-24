@@ -1,5 +1,6 @@
 package com.smartcard.backend.controller.exam;
 
+import com.smartcard.backend.dto.ExamAttemptHistoryDTO;
 import com.smartcard.backend.dto.ExamTakeDTO;
 import com.smartcard.backend.entity.User;
 import com.smartcard.backend.entity.exam.Exam;
@@ -18,6 +19,7 @@ import org.springframework.mock.web.MockHttpSession;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -100,5 +102,36 @@ class ExamAttemptRestControllerTest {
         ExamTakeDTO body = assertInstanceOf(ExamTakeDTO.class, response.getBody());
         assertEquals(21L, body.questions().get(0).options().get(0).id());
         verify(examQuestionService).getQuestionsByExam(exam);
+    }
+
+    @Test
+    void returnsHistoryOnlyForTheLoggedInUser() {
+        User user = new User();
+        user.setUsername("student");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("loggedInUser", user);
+
+        Exam exam = new Exam();
+        exam.setId(7L);
+        exam.setPublic(true);
+        ExamAttemptHistoryDTO attempt = new ExamAttemptHistoryDTO(
+                15L,
+                2,
+                LocalDateTime.of(2026, 11, 24, 10, 0),
+                LocalDateTime.of(2026, 11, 24, 10, 5),
+                300,
+                3,
+                5,
+                60.0);
+        when(examService.getExamById(7L)).thenReturn(Optional.of(exam));
+        when(examAttemptService.getHistoryForUserAndExam("student", 7L)).thenReturn(List.of(attempt));
+
+        ResponseEntity<?> response = controller.getMyExamHistory(7L, session);
+
+        assertEquals(200, response.getStatusCode().value());
+        List<?> history = assertInstanceOf(List.class, response.getBody());
+        ExamAttemptHistoryDTO result = assertInstanceOf(ExamAttemptHistoryDTO.class, history.get(0));
+        assertEquals(2, result.attemptNumber());
+        assertEquals(300, result.timeSpentSeconds());
     }
 }
