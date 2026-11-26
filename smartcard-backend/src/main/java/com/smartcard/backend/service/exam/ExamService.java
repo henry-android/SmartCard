@@ -4,6 +4,9 @@ package com.smartcard.backend.service.exam;
 import com.smartcard.backend.entity.exam.Exam;
 import com.smartcard.backend.repositories.exam.ExamRepository;
 import com.smartcard.backend.repositories.exam.ExamAttemptRepository;
+import com.smartcard.backend.repositories.exam.ExamAttemptAnswerRepository;
+import com.smartcard.backend.repositories.exam.ExamQuestionRepository;
+import com.smartcard.backend.repositories.exam.ExamOptionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +24,12 @@ public class ExamService {
     private ExamRepository examRepository;
     @Autowired
     private ExamAttemptRepository examAttemptRepository;
+    @Autowired
+    private ExamAttemptAnswerRepository examAttemptAnswerRepository;
+    @Autowired
+    private ExamQuestionRepository examQuestionRepository;
+    @Autowired
+    private ExamOptionRepository examOptionRepository;
 
     public Exam createExam(Exam exam) {
         if (exam.getCode() == null || exam.getCode().isEmpty()) {
@@ -36,6 +45,11 @@ public class ExamService {
         }
         return examRepository.save(exam);
     }
+
+    public Exam updateExam(Exam exam) {
+        return examRepository.save(exam);
+    }
+
     public Optional<Exam> findByCode(String code) {
         return examRepository.findByCode(code);
     }
@@ -76,8 +90,10 @@ public class ExamService {
     
     @Transactional
     public void deleteExam(Long id) {
-        // Xóa tất cả các attempt liên quan trước
+        examAttemptAnswerRepository.deleteByAttempt_Exam_Id(id);
         examAttemptRepository.deleteByExam_Id(id);
+        examOptionRepository.deleteByQuestion_Exam_Id(id);
+        examQuestionRepository.deleteByExam_Id(id);
         examRepository.deleteById(id);
     }
 }

@@ -2,7 +2,9 @@ package com.smartcard.backend.controller.exam;
 
 import com.smartcard.backend.dto.AIExamOptionDTO;
 import com.smartcard.backend.dto.AIExamQuestionDTO;
+import com.smartcard.backend.dto.ExamAIImportRequest;
 import com.smartcard.backend.dto.ExamQuestionDetailsDTO;
+import com.smartcard.backend.dto.ExamVisibilityUpdateRequest;
 import com.smartcard.backend.entity.User;
 import com.smartcard.backend.entity.exam.Exam;
 import com.smartcard.backend.entity.exam.ExamOption;
@@ -33,6 +35,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
@@ -108,7 +111,90 @@ class ExamRestControllerTest {
     }
 
     @Test
-    void createsExamAndQuestionsFromUploadedPdf() throws IOException {
+    void ownerCanChangeExamVisibility() {
+        User user = new User();
+        user.setUsername("owner");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("loggedInUser", user);
+
+        Exam exam = new Exam();
+        exam.setId(7L);
+        exam.setCreatedBy("owner");
+        exam.setPublic(true);
+        when(examService.getExamById(7L)).thenReturn(Optional.of(exam));
+        when(examService.updateExam(exam)).thenReturn(exam);
+
+        ResponseEntity<?> response = controller.updateExamVisibility(
+                7L,
+                new ExamVisibilityUpdateRequest(false),
+                session);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals(false, exam.isPublic());
+        Map<?, ?> body = assertInstanceOf(Map.class, response.getBody());
+        assertEquals(false, body.get("isPublic"));
+        verify(examService).updateExam(exam);
+    }
+
+    @Test
+    void nonOwnerCannotChangeExamVisibility() {
+        User user = new User();
+        user.setUsername("another-user");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("loggedInUser", user);
+
+        Exam exam = new Exam();
+        exam.setId(7L);
+        exam.setCreatedBy("owner");
+        when(examService.getExamById(7L)).thenReturn(Optional.of(exam));
+
+        ResponseEntity<?> response = controller.updateExamVisibility(
+                7L,
+                new ExamVisibilityUpdateRequest(false),
+                session);
+
+        assertEquals(403, response.getStatusCode().value());
+        verify(examService, org.mockito.Mockito.never()).updateExam(any(Exam.class));
+    }
+
+    @Test
+    void ownerCanDeleteExam() {
+        User user = new User();
+        user.setUsername("owner");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("loggedInUser", user);
+
+        Exam exam = new Exam();
+        exam.setId(7L);
+        exam.setCreatedBy("owner");
+        when(examService.getExamById(7L)).thenReturn(Optional.of(exam));
+
+        ResponseEntity<?> response = controller.deleteExam(7L, session);
+
+        assertEquals(204, response.getStatusCode().value());
+        verify(examService).deleteExam(7L);
+    }
+
+    @Test
+    void nonOwnerCannotDeleteExam() {
+        User user = new User();
+        user.setUsername("another-user");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("loggedInUser", user);
+
+        Exam exam = new Exam();
+        exam.setId(7L);
+        exam.setCreatedBy("owner");
+        when(examService.getExamById(7L)).thenReturn(Optional.of(exam));
+
+        ResponseEntity<?> response = controller.deleteExam(7L, session);
+
+        assertEquals(403, response.getStatusCode().value());
+        verify(examService, org.mockito.Mockito.never()).deleteExam(7L);
+    }
+
+    @Test
+    void previewsUploadedPdfWithoutPersistingExamOrQuestions() throws IOException {
         User user = new User();
         user.setUsername("owner");
         MockHttpSession session = new MockHttpSession();
@@ -124,9 +210,50 @@ class ExamRestControllerTest {
         generatedQuestion.setContent("Generated question");
         generatedQuestion.setOptions(List.of(correctOption, incorrectOption));
 
-        List<ExamQuestion> savedQuestions = new ArrayList<>();
         when(aiService.isConfigured()).thenReturn(true);
         when(aiService.analyzeExamQuestions(anyString())).thenReturn(List.of(generatedQuestion));
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "source.pdf",
+                "application/pdf",
+                createPdf("This source document contains enough text for AI exam question generation."));
+
+        ResponseEntity<?> response = controller.previewExamFromFile(
+                "Generated exam",
+                "Imported from PDF",
+                30,
+                true,
+                file,
+                session);
+
+        assertEquals(200, response.getStatusCode().value());
+        Map<?, ?> body = assertInstanceOf(Map.class, response.getBody());
+        assertEquals(0, body.get("rejectedCount"));
+        List<?> questions = assertInstanceOf(List.class, body.get("questions"));
+        assertEquals(1, questions.size());
+        verifyNoInteractions(examService, examQuestionService, examOptionService);
+    }
+
+    @Test
+    void confirmsEditedQuestionsAndPersistsExplanation() {
+        User user = new User();
+        user.setUsername("owner");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("loggedInUser", user);
+
+        AIExamOptionDTO correctOption = new AIExamOptionDTO();
+        correctOption.setContent("Edited correct answer");
+        correctOption.setCorrect(true);
+        AIExamOptionDTO incorrectOption = new AIExamOptionDTO();
+        incorrectOption.setContent("Edited incorrect answer");
+        incorrectOption.setCorrect(false);
+        AIExamQuestionDTO editedQuestion = new AIExamQuestionDTO();
+        editedQuestion.setContent("Edited question");
+        editedQuestion.setExplanation("Because this is the correct choice.");
+        editedQuestion.setOptions(List.of(correctOption, incorrectOption));
+
+        List<ExamQuestion> savedQuestions = new ArrayList<>();
         when(examService.createExam(any(Exam.class))).thenAnswer(invocation -> {
             Exam exam = invocation.getArgument(0);
             exam.setId(7L);
@@ -141,18 +268,13 @@ class ExamRestControllerTest {
         });
         when(examOptionService.addOption(any(ExamOption.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        MockMultipartFile file = new MockMultipartFile(
-                "file",
-                "source.pdf",
-                "application/pdf",
-                createPdf("This source document contains enough text for AI exam question generation."));
-
-        ResponseEntity<?> response = controller.createExamFromFile(
-                "Generated exam",
-                "Imported from PDF",
-                30,
-                true,
-                file,
+        ResponseEntity<?> response = controller.confirmNewExamImport(
+                new ExamAIImportRequest(
+                        "Generated exam",
+                        "Imported from PDF",
+                        30,
+                        true,
+                        List.of(editedQuestion)),
                 session);
 
         assertEquals(201, response.getStatusCode().value());
@@ -162,7 +284,60 @@ class ExamRestControllerTest {
         assertEquals("Generated exam", exam.getTitle());
         assertEquals(1, exam.getTotalQuestions());
         assertEquals(1, savedQuestions.size());
+        assertEquals("Edited question", savedQuestions.get(0).getContent());
+        assertEquals("Because this is the correct choice.", savedQuestions.get(0).getExplanation());
         verify(examOptionService, times(2)).addOption(any(ExamOption.class));
+    }
+
+    @Test
+    void scannedPdfReportsWhenOcrIsNotConfigured() throws IOException {
+        User user = new User();
+        user.setUsername("owner");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("loggedInUser", user);
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "scan.pdf",
+                "application/pdf",
+                createPdf(""));
+
+        ResponseEntity<?> response = controller.previewExamFromFile(
+                "Scanned exam",
+                "",
+                30,
+                true,
+                file,
+                session);
+
+        assertEquals(503, response.getStatusCode().value());
+        Map<?, ?> body = assertInstanceOf(Map.class, response.getBody());
+        assertTrue(body.get("message").toString().contains("Tesseract"));
+        verifyNoInteractions(aiService, examService, examQuestionService, examOptionService);
+    }
+
+    @Test
+    void rejectsQuestionWithMultipleCorrectOptionsWithoutSaving() {
+        User user = new User();
+        user.setUsername("owner");
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute("loggedInUser", user);
+
+        AIExamOptionDTO firstCorrectOption = new AIExamOptionDTO();
+        firstCorrectOption.setContent("Option A");
+        firstCorrectOption.setCorrect(true);
+        AIExamOptionDTO secondCorrectOption = new AIExamOptionDTO();
+        secondCorrectOption.setContent("Option B");
+        secondCorrectOption.setCorrect(true);
+        AIExamQuestionDTO question = new AIExamQuestionDTO();
+        question.setContent("Question");
+        question.setOptions(List.of(firstCorrectOption, secondCorrectOption));
+
+        ResponseEntity<?> response = controller.confirmNewExamImport(
+                new ExamAIImportRequest("Exam", "", 30, true, List.of(question)),
+                session);
+
+        assertEquals(400, response.getStatusCode().value());
+        verifyNoInteractions(examService, examQuestionService, examOptionService);
     }
 
     private byte[] createPdf(String content) throws IOException {

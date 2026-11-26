@@ -7,8 +7,19 @@ export default function Exams() {
   const [exams, setExams] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedExam, setSelectedExam] = useState(null)
+  const [editingVisibilityExam, setEditingVisibilityExam] = useState(null)
+  const [visibilityForm, setVisibilityForm] = useState(true)
+  const [updatingVisibility, setUpdatingVisibility] = useState(false)
+  const [visibilityError, setVisibilityError] = useState('')
+  const [examNotice, setExamNotice] = useState('')
+  const [deletingExamId, setDeletingExamId] = useState(null)
   const [file, setFile] = useState(null)
   const [createFile, setCreateFile] = useState(null)
+  const [aiConsent, setAiConsent] = useState(false)
+  const [aiImportDraft, setAiImportDraft] = useState(null)
+  const [aiImportError, setAiImportError] = useState('')
+  const [regenerating, setRegenerating] = useState(false)
+  const [confirmingImport, setConfirmingImport] = useState(false)
   const [viewingExam, setViewingExam] = useState(null)
   const [examQuestions, setExamQuestions] = useState([])
   const [loadingQuestions, setLoadingQuestions] = useState(false)
@@ -62,23 +73,36 @@ export default function Exams() {
   const createExam = async (event) => {
     event.preventDefault()
     setMessage('')
+    if (createFile && !aiConsent) {
+      setMessage('Xác nhận gửi tài liệu tới OpenRouter trước khi phân tích.')
+      return
+    }
     setCreating(true)
     try {
       const examData = {
         ...examForm,
         duration: Number(examForm.duration),
       }
-      const { data } = createFile
-        ? await examService.createFromFile(examData, createFile)
-        : await examService.create(examData)
+      if (createFile) {
+        const { data } = await examService.previewCreateFromFile(examData, createFile)
+        setAiImportDraft({
+          mode: 'create',
+          examData,
+          file: createFile,
+          questions: data.questions || [],
+          rejectedCount: data.rejectedCount || 0,
+        })
+        setAiImportError('')
+        setShowCreate(false)
+        return
+      }
+
+      await examService.create(examData)
       setShowCreate(false)
       setExamForm({ title: '', description: '', duration: 30, isPublic: true })
       setCreateFile(null)
+      setAiConsent(false)
       await load()
-      if (createFile) {
-        await viewQuestions(data.exam)
-        setQuestionsNotice(data.message)
-      }
     } catch (error) {
       setMessage(error.response?.data?.message || 'Không thể tạo đề thi.')
     } finally {
@@ -89,22 +113,193 @@ export default function Exams() {
   const importExam = async (event) => {
     event.preventDefault()
     if (!selectedExam || !file) return
+    if (!aiConsent) {
+      setMessage('Xác nhận gửi tài liệu tới OpenRouter trước khi phân tích.')
+      return
+    }
 
     setImporting(true)
     setMessage('')
     try {
-      const { data } = await examService.aiImport(selectedExam.id, file)
-      setMessage(data.message)
-      setFile(null)
-      setSelectedExam((current) => current
-        ? { ...current, totalQuestions: (current.totalQuestions || 0) + data.importedCount }
-        : current)
-      await load()
+      const { data } = await examService.previewAiImport(selectedExam.id, file)
+      setAiImportDraft({
+        mode: 'append',
+        exam: selectedExam,
+        file,
+        questions: data.questions || [],
+        rejectedCount: data.rejectedCount || 0,
+      })
+      setAiImportError('')
+      setSelectedExam(null)
     } catch (error) {
       setMessage(error.response?.data?.message || 'Không thể import đề thi.')
     } finally {
       setImporting(false)
     }
+  }
+
+  const editExamVisibility = (exam) => {
+    setEditingVisibilityExam(exam)
+    setVisibilityForm(exam.isPublic === true || exam.public === true)
+    setVisibilityError('')
+    setExamNotice('')
+  }
+
+  const saveExamVisibility = async (event) => {
+    event.preventDefault()
+    if (!editingVisibilityExam) return
+
+    setUpdatingVisibility(true)
+    setVisibilityError('')
+    try {
+      const { data } = await examService.updateVisibility(editingVisibilityExam.id, visibilityForm)
+      setExams((current) => current.map((exam) => (
+        exam.id === editingVisibilityExam.id
+          ? { ...exam, isPublic: data.isPublic, public: data.isPublic }
+          : exam
+      )))
+      setExamNotice(data.message)
+      setEditingVisibilityExam(null)
+    } catch (error) {
+      setVisibilityError(error.response?.data?.message || 'Không thể cập nhật quyền riêng tư của đề thi.')
+    } finally {
+      setUpdatingVisibility(false)
+    }
+  }
+
+  const deleteExam = async (exam) => {
+    const confirmed = window.confirm(
+      `Xóa đề thi "${exam.title}"? Toàn bộ câu hỏi, đáp án và lịch sử làm bài sẽ bị xóa. Thao tác này không thể hoàn tác.`,
+    )
+    if (!confirmed) return
+
+    setDeletingExamId(exam.id)
+    setMessage('')
+    setExamNotice('')
+    try {
+      await examService.deleteExam(exam.id)
+      setExams((current) => current.filter((item) => item.id !== exam.id))
+      setExamNotice(`Đã xóa đề thi "${exam.title}".`)
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Không thể xóa đề thi.')
+    } finally {
+      setDeletingExamId(null)
+    }
+  }
+
+  const updateDraftQuestion = (questionIndex, updates) => {
+    setAiImportDraft((draft) => ({
+      ...draft,
+      questions: draft.questions.map((question, index) => (
+        index === questionIndex ? { ...question, ...updates } : question
+      )),
+    }))
+  }
+
+  const updateDraftOption = (questionIndex, optionIndex, updates) => {
+    setAiImportDraft((draft) => ({
+      ...draft,
+      questions: draft.questions.map((question, index) => {
+        if (index !== questionIndex) return question
+        return {
+          ...question,
+          options: question.options.map((option, currentOptionIndex) => ({
+            ...option,
+            ...(currentOptionIndex === optionIndex ? updates : {}),
+            ...(updates.correct ? { correct: currentOptionIndex === optionIndex } : {}),
+          })),
+        }
+      }),
+    }))
+  }
+
+  const regenerateDraft = async () => {
+    if (!aiImportDraft) return
+    setRegenerating(true)
+    setAiImportError('')
+    try {
+      const response = aiImportDraft.mode === 'create'
+        ? await examService.previewCreateFromFile(aiImportDraft.examData, aiImportDraft.file)
+        : await examService.previewAiImport(aiImportDraft.exam.id, aiImportDraft.file)
+      setAiImportDraft((draft) => ({
+        ...draft,
+        questions: response.data.questions || [],
+        rejectedCount: response.data.rejectedCount || 0,
+      }))
+    } catch (error) {
+      setAiImportError(error.response?.data?.message || 'Không thể tạo lại câu hỏi từ file.')
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
+  const confirmAiImport = async () => {
+    if (!aiImportDraft) return
+    setConfirmingImport(true)
+    setAiImportError('')
+    try {
+      if (aiImportDraft.mode === 'create') {
+        const { data } = await examService.confirmCreateFromFile({
+          ...aiImportDraft.examData,
+          questions: aiImportDraft.questions,
+        })
+        setMessage('')
+        setAiImportDraft(null)
+        setExamForm({ title: '', description: '', duration: 30, isPublic: true })
+        setCreateFile(null)
+        setAiConsent(false)
+        await load()
+        await viewQuestions(data.exam)
+        setQuestionsNotice(data.message)
+      } else {
+        const { data } = await examService.confirmAiImport(
+          aiImportDraft.exam.id,
+          aiImportDraft.questions,
+        )
+        const updatedExam = {
+          ...aiImportDraft.exam,
+          totalQuestions: (aiImportDraft.exam.totalQuestions || 0) + data.importedCount,
+        }
+        setMessage('')
+        setAiImportDraft(null)
+        setFile(null)
+        setAiConsent(false)
+        await load()
+        await viewQuestions(updatedExam)
+        setQuestionsNotice(data.message)
+      }
+    } catch (error) {
+      setAiImportError(error.response?.data?.message || 'Không thể lưu đề thi.')
+    } finally {
+      setConfirmingImport(false)
+    }
+  }
+
+  const getDraftQuestionError = (question) => {
+    if (!question.content?.trim()) return 'Nhập nội dung câu hỏi.'
+    const options = question.options || []
+    const populatedOptions = options.filter((option) => option.content?.trim())
+    if (populatedOptions.length < 2) {
+      return 'Cần ít nhất hai đáp án có nội dung.'
+    }
+    if (populatedOptions.length > 5) {
+      return 'Mỗi câu chỉ được có tối đa năm đáp án.'
+    }
+    if (populatedOptions.filter((option) => option.correct).length !== 1) {
+      return 'Chọn chính xác một đáp án đúng.'
+    }
+    return ''
+  }
+
+  const canConfirmDraft = aiImportDraft?.questions.length > 0
+    && aiImportDraft.questions.every((question) => !getDraftQuestionError(question))
+
+  const discardAiImportDraft = () => {
+    if (aiImportDraft?.mode === 'create') setCreateFile(null)
+    if (aiImportDraft?.mode === 'append') setFile(null)
+    setAiConsent(false)
+    setAiImportError('')
+    setAiImportDraft(null)
   }
 
   const viewQuestions = async (exam) => {
@@ -233,7 +428,10 @@ export default function Exams() {
     <section className="container page">
       <div className="page-header">
         <div><p className="eyebrow dark">ĐÁNH GIÁ</p><h1>Bài kiểm tra</h1></div>
-        {user && <button className="btn primary" type="button" onClick={() => setShowCreate(true)}>+ Tạo đề thi</button>}
+        {user && <button className="btn primary" type="button" onClick={() => {
+          setAiConsent(false)
+          setShowCreate(true)
+        }}>+ Tạo đề thi</button>}
       </div>
 
       {loading ? <div className="empty">Đang tải đề thi...</div> : exams.length ? (
@@ -247,9 +445,9 @@ export default function Exams() {
                   <span>{exam.duration} phút</span>
                   <span>{exam.totalQuestions} câu</span>
                 </div>
-                {(exam.public === true || exam.isPublic === true) && (
-                  <span className="exam-visibility">Công khai</span>
-                )}
+                <span className={`exam-visibility ${exam.public === true || exam.isPublic === true ? '' : 'private'}`}>
+                  {exam.public === true || exam.isPublic === true ? 'Công khai' : 'Riêng tư'}
+                </span>
                 {user && ((exam.public === true || exam.isPublic === true)
                   || exam.createdBy === user.username) && (
                   <button className="btn primary exam-start-button" type="button" onClick={() => startExam(exam)}>
@@ -263,8 +461,24 @@ export default function Exams() {
                       setSelectedExam(exam)
                       setMessage('')
                       setFile(null)
+                      setAiConsent(false)
                     }}>AI Import file</button>
                   </div>
+                )}
+                {user && exam.createdBy === user.username && (
+                  <button
+                    className="btn ghost exam-visibility-button"
+                    type="button"
+                    onClick={() => editExamVisibility(exam)}
+                  >Chỉnh sửa quyền riêng tư</button>
+                )}
+                {user && exam.createdBy === user.username && (
+                  <button
+                    className="btn ghost exam-delete-button"
+                    type="button"
+                    disabled={deletingExamId === exam.id}
+                    onClick={() => deleteExam(exam)}
+                  >{deletingExamId === exam.id ? 'Đang xóa...' : 'Xóa đề thi'}</button>
                 )}
                 {user && (
                   <button className="btn ghost exam-history-button" type="button" onClick={() => viewHistory(exam)}>
@@ -278,19 +492,68 @@ export default function Exams() {
       ) : <div className="empty"><h3>Chưa có đề thi</h3></div>}
       {!user && !loading && exams.some((exam) => exam.public === true || exam.isPublic === true)
         && <p className="exam-login-hint">Đăng nhập để bắt đầu làm bài và lưu kết quả.</p>}
+      {examNotice && <p className="alert success">{examNotice}</p>}
       {message && !selectedExam && !showCreate && <p className="alert error">{message}</p>}
+
+      {editingVisibilityExam && (
+        <div className="modal-backdrop" onMouseDown={() => setEditingVisibilityExam(null)}>
+          <form className="modal" onSubmit={saveExamVisibility} onMouseDown={(event) => event.stopPropagation()}>
+            <h2>Chỉnh sửa quyền riêng tư</h2>
+            <p className="visibility-exam-title">{editingVisibilityExam.title}</p>
+            <label className="check visibility-toggle">
+              <input
+                type="checkbox"
+                checked={visibilityForm}
+                onChange={(event) => setVisibilityForm(event.target.checked)}
+              />
+              Công khai đề thi
+            </label>
+            <p className="visibility-help">
+              {visibilityForm
+                ? 'Đề thi công khai có thể được người dùng khác tìm thấy và làm bài.'
+                : 'Đề thi riêng tư chỉ hiển thị với bạn; người khác không thể mở hoặc làm bài.'}
+            </p>
+            {visibilityError && <p className="alert error">{visibilityError}</p>}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={updatingVisibility}
+                onClick={() => setEditingVisibilityExam(null)}
+              >Hủy</button>
+              <button className="btn primary" disabled={updatingVisibility}>
+                {updatingVisibility ? 'Đang lưu...' : 'Lưu thay đổi'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {selectedExam && (
         <div className="modal-backdrop" onMouseDown={() => setSelectedExam(null)}>
           <form className="modal" onSubmit={importExam} onMouseDown={(event) => event.stopPropagation()}>
             <h2>AI Import: {selectedExam.title}</h2>
             <label>File đề thi (.pdf, .doc, .docx)
-              <input type="file" accept=".pdf,.doc,.docx" onChange={(event) => setFile(event.target.files?.[0] || null)} required />
+              <input type="file" accept=".pdf,.doc,.docx" onChange={(event) => {
+                setFile(event.target.files?.[0] || null)
+                setAiConsent(false)
+              }} required />
             </label>
-            {message && <p>{message}</p>}
+            {file && (
+              <label className="check ai-consent">
+                <input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} required />
+                <span>Tôi hiểu rằng nội dung tài liệu sẽ được gửi tới dịch vụ AI OpenRouter để phân tích. Không tải lên tài liệu nhạy cảm hoặc chứa thông tin riêng tư.</span>
+              </label>
+            )}
+            {message && <p className="alert error">{message}</p>}
             <div className="modal-actions">
-              <button type="button" className="btn ghost" onClick={() => setSelectedExam(null)}>Đóng</button>
-              <button className="btn primary" disabled={importing}>{importing ? 'Đang phân tích...' : 'Import bằng AI'}</button>
+              <button type="button" className="btn ghost" onClick={() => {
+                setSelectedExam(null)
+                setAiConsent(false)
+              }}>Đóng</button>
+              <button className="btn primary" disabled={importing || !file || !aiConsent}>
+                {importing ? 'Đang phân tích...' : 'Xem trước câu hỏi'}
+              </button>
             </div>
           </form>
         </div>
@@ -314,19 +577,145 @@ export default function Exams() {
               Công khai đề thi
             </label>
             <label>File đề thi (PDF, DOC, DOCX; chọn file để AI tạo câu hỏi)
-              <input type="file" accept=".pdf,.doc,.docx" onChange={(event) => setCreateFile(event.target.files?.[0] || null)} />
+              <input type="file" accept=".pdf,.doc,.docx" onChange={(event) => {
+                setCreateFile(event.target.files?.[0] || null)
+                setAiConsent(false)
+              }} />
             </label>
-            {message && <p>{message}</p>}
+            {createFile && (
+              <label className="check ai-consent">
+                <input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} required />
+                <span>Tôi hiểu rằng nội dung tài liệu sẽ được gửi tới dịch vụ AI OpenRouter để phân tích. Không tải lên tài liệu nhạy cảm hoặc chứa thông tin riêng tư.</span>
+              </label>
+            )}
+            {message && <p className="alert error">{message}</p>}
             <div className="modal-actions">
               <button type="button" className="btn ghost" onClick={() => {
                 setShowCreate(false)
                 setCreateFile(null)
+                setAiConsent(false)
               }}>Hủy</button>
-              <button className="btn primary" disabled={creating}>
-                {creating ? 'Đang tạo...' : createFile ? 'Tạo đề và sinh câu hỏi' : 'Tạo đề thi'}
+              <button className="btn primary" disabled={creating || (createFile && !aiConsent)}>
+                {creating ? 'Đang xử lý...' : createFile ? 'Tạo bản xem trước' : 'Tạo đề thi'}
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {aiImportDraft && (
+        <div className="modal-backdrop" onMouseDown={discardAiImportDraft}>
+          <section className="modal ai-import-review-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="ai-review-header">
+              <div>
+                <p className="eyebrow dark">KIỂM TRA TRƯỚC KHI LƯU</p>
+                <h2>{aiImportDraft.mode === 'create' ? aiImportDraft.examData.title : aiImportDraft.exam.title}</h2>
+                <p>AI có thể tạo đáp án chưa chính xác. Hãy xem lại câu hỏi và đáp án trước khi xác nhận.</p>
+              </div>
+              <button className="btn ghost" type="button" onClick={discardAiImportDraft}>Đóng</button>
+            </header>
+            {aiImportDraft.rejectedCount > 0 && (
+              <p className="alert error">Đã bỏ qua {aiImportDraft.rejectedCount} mục không hợp lệ do AI tạo.</p>
+            )}
+            {aiImportError && <p className="alert error">{aiImportError}</p>}
+            <div className="ai-review-list">
+              {aiImportDraft.questions.map((question, questionIndex) => (
+                <article className="ai-review-question" key={`draft-question-${questionIndex}`}>
+                  <div className="ai-review-question-heading">
+                    <h3>Câu {questionIndex + 1}</h3>
+                    <button className="btn ghost" type="button" onClick={() => {
+                      setAiImportDraft((draft) => ({
+                        ...draft,
+                        questions: draft.questions.filter((_, index) => index !== questionIndex),
+                      }))
+                    }}>Xóa câu</button>
+                  </div>
+                  <label>Nội dung câu hỏi
+                    <textarea
+                      value={question.content || ''}
+                      onChange={(event) => updateDraftQuestion(questionIndex, { content: event.target.value })}
+                      rows="3"
+                    />
+                  </label>
+                  <fieldset className="ai-review-options">
+                    <legend>Đáp án — chọn đáp án đúng</legend>
+                    {(question.options || []).map((option, optionIndex) => (
+                      <div className="ai-review-option" key={`draft-option-${questionIndex}-${optionIndex}`}>
+                        <input
+                          type="radio"
+                          name={`correct-answer-${questionIndex}`}
+                          aria-label={`Đánh dấu đáp án ${optionIndex + 1} là đúng`}
+                          checked={Boolean(option.correct)}
+                          onChange={() => updateDraftOption(questionIndex, optionIndex, { correct: true })}
+                        />
+                        <input
+                          value={option.content || ''}
+                          aria-label={`Nội dung đáp án ${optionIndex + 1}`}
+                          onChange={(event) => updateDraftOption(questionIndex, optionIndex, { content: event.target.value })}
+                        />
+                        <button
+                          className="btn ghost"
+                          type="button"
+                          aria-label={`Xóa đáp án ${optionIndex + 1}`}
+                          disabled={question.options.length <= 2}
+                          onClick={() => updateDraftQuestion(questionIndex, {
+                            options: question.options.filter((_, index) => index !== optionIndex),
+                          })}
+                        >Xóa</button>
+                      </div>
+                    ))}
+                    <button
+                      className="btn ghost ai-add-option"
+                      type="button"
+                      disabled={(question.options || []).length >= 5}
+                      onClick={() => updateDraftQuestion(questionIndex, {
+                        options: [...(question.options || []), { content: '', correct: false }],
+                      })}
+                    >+ Thêm đáp án</button>
+                  </fieldset>
+                  <label>Giải thích đáp án đúng
+                    <textarea
+                      value={question.explanation || ''}
+                      onChange={(event) => updateDraftQuestion(questionIndex, { explanation: event.target.value })}
+                      rows="2"
+                    />
+                  </label>
+                  {getDraftQuestionError(question) && (
+                    <p className="ai-question-validation">{getDraftQuestionError(question)}</p>
+                  )}
+                </article>
+              ))}
+            </div>
+            <button className="btn ghost ai-add-question" type="button" onClick={() => {
+              setAiImportDraft((draft) => ({
+                ...draft,
+                questions: [...draft.questions, {
+                  content: '',
+                  explanation: '',
+                  options: [
+                    { content: '', correct: true },
+                    { content: '', correct: false },
+                  ],
+                }],
+              }))
+            }}>+ Thêm câu hỏi</button>
+            <div className="modal-actions ai-review-actions">
+              <button className="btn ghost" type="button" disabled={regenerating || confirmingImport} onClick={regenerateDraft}>
+                {regenerating ? 'Đang tạo lại...' : 'Tạo lại từ file'}
+              </button>
+              {aiImportDraft.mode === 'create' && (
+                <button className="btn ghost" type="button" disabled={regenerating || confirmingImport} onClick={() => {
+                  setExamForm(aiImportDraft.examData)
+                  setCreateFile(aiImportDraft.file)
+                  setAiImportDraft(null)
+                  setShowCreate(true)
+                }}>Quay lại thông tin đề</button>
+              )}
+              <button className="btn primary" type="button" disabled={!canConfirmDraft || confirmingImport || regenerating} onClick={confirmAiImport}>
+                {confirmingImport ? 'Đang lưu...' : 'Xác nhận và lưu'}
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
@@ -341,6 +730,7 @@ export default function Exams() {
                 {examQuestions.map((question) => (
                   <li key={question.id}>
                     <strong>{question.content}</strong>
+                    {question.explanation && <p className="question-explanation">Giải thích: {question.explanation}</p>}
                     <ul>
                       {(question.options || []).map((option) => (
                         <li key={option.id} className={option.correct ? 'correct-option' : ''}>
@@ -453,6 +843,9 @@ export default function Exams() {
                     <p>Câu trả lời của bạn: <strong>{question.selectedOptionContent || 'Bỏ qua'}</strong></p>
                     {!question.correct && (
                       <p className="correct-answer">Đáp án đúng: <strong>{question.correctOptionContent || 'Chưa có đáp án'}</strong></p>
+                    )}
+                    {question.explanation && (
+                      <p className="review-explanation">Giải thích: <strong>{question.explanation}</strong></p>
                     )}
                   </article>
                 ))}

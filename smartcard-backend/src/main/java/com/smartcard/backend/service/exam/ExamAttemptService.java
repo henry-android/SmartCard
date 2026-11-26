@@ -280,6 +280,7 @@ public class ExamAttemptService {
                     return new ExamSubmissionResultDTO.QuestionResult(
                             question.getId(),
                             question.getContent(),
+                            question.getExplanation(),
                             selected == null ? null : selected.getId(),
                             selected == null ? null : selected.getContent(),
                             correct == null ? null : correct.getId(),

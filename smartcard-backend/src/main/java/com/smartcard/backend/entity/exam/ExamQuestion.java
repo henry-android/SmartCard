@@ -15,6 +15,8 @@ public class ExamQuestion {
     private Exam exam;
     @Column(columnDefinition = "TEXT")
     private String content;
+    @Column(columnDefinition = "TEXT")
+    private String explanation;
     private int questionOrder;
     @OneToMany(mappedBy = "question", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
@@ -43,6 +45,14 @@ public class ExamQuestion {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getExplanation() {
+        return explanation;
+    }
+
+    public void setExplanation(String explanation) {
+        this.explanation = explanation;
     }
 
     public int getQuestionOrder() {

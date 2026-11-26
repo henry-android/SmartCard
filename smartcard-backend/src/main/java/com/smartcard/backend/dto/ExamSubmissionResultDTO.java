@@ -13,6 +13,7 @@ public record ExamSubmissionResultDTO(
     public record QuestionResult(
             Long questionId,
             String content,
+            String explanation,
             Long selectedOptionId,
             String selectedOptionContent,
             Long correctOptionId,
