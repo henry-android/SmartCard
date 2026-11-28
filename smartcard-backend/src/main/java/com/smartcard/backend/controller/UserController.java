@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
+import jakarta.servlet.http.HttpSession;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -67,14 +68,24 @@ public class UserController {
 
     // Chỉnh sửa hồ sơ
     @PutMapping("/profile")
-    public ResponseEntity<?> editProfile(@RequestParam Integer userId, @RequestBody EditProfileRequest req) {
+    public ResponseEntity<?> editProfile(@RequestParam Integer userId, @RequestBody EditProfileRequest req, HttpSession session) {
         User user = userService.findById(userId).orElse(null);
         if (user == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
         user.setUsername(req.getUsername());
         user.setEmail(req.getEmail());
         user.setAvatarUrl(req.getAvatarUrl());
         userService.saveUser(user);
-        return ResponseEntity.ok("Cập nhật hồ sơ thành công");
+        Object logged = session.getAttribute("loggedInUser");
+        if (logged instanceof User sessionUser && user.getId().equals(sessionUser.getId())) {
+            session.setAttribute("loggedInUser", user);
+        }
+        return ResponseEntity.ok(Map.of(
+                "id", user.getId(),
+                "username", user.getUsername(),
+                "email", user.getEmail() == null ? "" : user.getEmail(),
+                "avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl(),
+                "message", "Cập nhật hồ sơ thành công"
+        ));
     }
 
     // Gửi OTP về email để xác nhận đổi mật khẩu

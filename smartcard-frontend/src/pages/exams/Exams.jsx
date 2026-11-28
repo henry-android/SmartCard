@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { deckService } from '../../common/api/services/deckService'
 import { examService } from '../../common/api/services/examService'
+import { flashcardService } from '../../common/api/services/flashcardService'
 import { useAuth } from '../../common/hooks/authentication/AuthProvider'
 import Tilt3DCard from '../../components/ui/Tilt3DCard'
 import { staggerContainer, staggerItem } from '../../components/ui/PageTransition'
@@ -45,6 +47,10 @@ export default function Exams() {
   const [creating, setCreating] = useState(false)
   const [importing, setImporting] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  const [decks, setDecks] = useState([])
+  const [targetDeckId, setTargetDeckId] = useState('')
+  const [savedFlashcardIds, setSavedFlashcardIds] = useState({})
+  const [savingFlashcardId, setSavingFlashcardId] = useState(null)
   const [examForm, setExamForm] = useState({
     title: '',
     description: '',
@@ -72,6 +78,38 @@ export default function Exams() {
   }
 
   useEffect(() => { load() }, [user])
+
+  useEffect(() => {
+    if (!submissionResult || !user) return
+    deckService.getAll()
+      .then(({ data }) => {
+        const list = Array.isArray(data) ? data : []
+        setDecks(list)
+        if (list.length && !targetDeckId) {
+          setTargetDeckId(String(list[0].id))
+        }
+      })
+      .catch(() => setDecks([]))
+  }, [submissionResult, user])
+
+  const saveWrongQuestionAsFlashcard = async (question) => {
+    if (!targetDeckId || savingFlashcardId) return
+    setSavingFlashcardId(question.questionId)
+    try {
+      const answerText = question.correctOptionContent || 'Chưa có đáp án'
+      const definition = question.explanation
+        ? `${answerText}\n\nGiải thích: ${question.explanation}`
+        : answerText
+      await flashcardService.create({
+        term: question.content,
+        definition,
+        createdAt: new Date().toISOString(),
+      }, targetDeckId)
+      setSavedFlashcardIds((prev) => ({ ...prev, [question.questionId]: true }))
+    } finally {
+      setSavingFlashcardId(null)
+    }
+  }
 
   const createExam = async (event) => {
     event.preventDefault()
@@ -848,6 +886,16 @@ export default function Exams() {
                     <p>Bạn trả lời đúng {submissionResult.score} trên tổng số {submissionResult.totalQuestions} câu.</p>
                   </div>
                 </div>
+                {decks.length > 0 && submissionResult.questions.some((q) => !q.correct) && (
+                  <div className="save-to-deck-bar">
+                    <span>Lưu câu làm sai vào bộ thẻ:</span>
+                    <select value={targetDeckId} onChange={(event) => setTargetDeckId(event.target.value)}>
+                      {decks.map((deck) => (
+                        <option key={deck.id} value={deck.id}>{deck.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {submissionResult.questions.map((question, index) => (
                   <article className={`review-question ${question.correct ? 'is-correct' : 'is-incorrect'}`} key={question.questionId}>
                     <div className="review-question-heading">
@@ -861,6 +909,22 @@ export default function Exams() {
                     )}
                     {question.explanation && (
                       <p className="review-explanation">Giải thích: <strong>{question.explanation}</strong></p>
+                    )}
+                    {!question.correct && decks.length > 0 && (
+                      <div className="review-save-action">
+                        <button
+                          type="button"
+                          className={`btn ${savedFlashcardIds[question.questionId] ? 'study-known-btn' : 'ghost'}`}
+                          disabled={Boolean(savedFlashcardIds[question.questionId]) || savingFlashcardId === question.questionId}
+                          onClick={() => saveWrongQuestionAsFlashcard(question)}
+                        >
+                          {savedFlashcardIds[question.questionId]
+                            ? 'Đã lưu vào bộ thẻ ✓'
+                            : savingFlashcardId === question.questionId
+                              ? 'Đang lưu...'
+                              : '+ Lưu thành Flashcard'}
+                        </button>
+                      </div>
                     )}
                   </article>
                 ))}

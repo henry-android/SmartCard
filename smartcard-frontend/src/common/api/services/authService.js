@@ -5,4 +5,5 @@ export const authService = {
   signup: (payload) => api.post('/api/auth/signup', payload),
   current: () => api.get('/api/auth/current'),
   logout: () => api.post('/api/auth/logout'),
+  updateProfile: (userId, payload) => api.put(`/api/users/profile?userId=${userId}`, payload),
 }

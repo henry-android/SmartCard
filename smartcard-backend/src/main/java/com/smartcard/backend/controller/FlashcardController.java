@@ -5,6 +5,7 @@ import com.smartcard.backend.service.FlashcardService;
 import com.smartcard.backend.service.DeckService;
 import com.smartcard.backend.entity.Deck;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -42,6 +43,17 @@ public class FlashcardController {
             flashcard.setDeck(deck);
         }
         return flashcardService.saveFlashcard(flashcard);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<Flashcard> updateFlashcard(@PathVariable Integer id, @RequestBody Flashcard updated) {
+        return flashcardService.getFlashcardById(id)
+                .map(existing -> {
+                    existing.setTerm(updated.getTerm());
+                    existing.setDefinition(updated.getDefinition());
+                    return ResponseEntity.ok(flashcardService.saveFlashcard(existing));
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")

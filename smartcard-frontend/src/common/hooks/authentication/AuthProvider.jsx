@@ -31,8 +31,15 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
+  const updateUserProfile = async (payload) => {
+    if (!user?.id) return null
+    const { data } = await authService.updateProfile(user.id, payload)
+    setUser((prev) => (prev ? { ...prev, ...data } : prev))
+    return data
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, logout, updateUserProfile }}>
       {children}
     </AuthContext.Provider>
   )
