@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { examService } from '../../common/api/services/examService'
 import { useAuth } from '../../common/hooks/authentication/AuthProvider'
+import Tilt3DCard from '../../components/ui/Tilt3DCard'
+import { staggerContainer, staggerItem } from '../../components/ui/PageTransition'
 
 export default function Exams() {
   const { user } = useAuth()
@@ -434,10 +437,22 @@ export default function Exams() {
         }}>+ Tạo đề thi</button>}
       </div>
 
-      {loading ? <div className="empty">Đang tải đề thi...</div> : exams.length ? (
-        <div className="deck-grid">
+      {loading ? (
+        <div className="deck-grid" aria-label="Đang tải đề thi">
+          {[1, 2, 3, 4].map((item) => (
+            <div className="deck-card skeleton-card" key={item}>
+              <div className="deck-body">
+                <div className="skeleton-line is-title" />
+                <div className="skeleton-line is-text" />
+                <div className="skeleton-line is-meta" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : exams.length ? (
+        <motion.div className="deck-grid" variants={staggerContainer} initial="hidden" animate="show">
           {exams.map((exam) => (
-            <article className="deck-card" key={exam.id}>
+            <Tilt3DCard className="deck-card" key={exam.id} variants={staggerItem}>
               <div className="deck-body">
                 <h3>{exam.title}</h3>
                 <p>{exam.description || 'Chưa có mô tả.'}</p>
@@ -486,9 +501,9 @@ export default function Exams() {
                   </button>
                 )}
               </div>
-            </article>
+            </Tilt3DCard>
           ))}
-        </div>
+        </motion.div>
       ) : <div className="empty"><h3>Chưa có đề thi</h3></div>}
       {!user && !loading && exams.some((exam) => exam.public === true || exam.isPublic === true)
         && <p className="exam-login-hint">Đăng nhập để bắt đầu làm bài và lưu kết quả.</p>}
@@ -881,35 +896,44 @@ export default function Exams() {
                     <p>{Object.keys(examAnswers).length} câu đã trả lời</p>
                   </aside>
                   {takingExam.questions[activeQuestionIndex] && (
-                    <main className="active-exam-question">
-                      <div className="question-kicker">
-                        <span>CÂU {activeQuestionIndex + 1}</span>
-                        <span>{takingExam.questions.length} câu</span>
-                      </div>
-                      <h3>{takingExam.questions[activeQuestionIndex].content}</h3>
-                      <fieldset className="exam-choice-list">
-                        <legend>Chọn một đáp án</legend>
-                        {takingExam.questions[activeQuestionIndex].options.map((option, optionIndex) => (
-                          <label
-                            key={option.id}
-                            className={`exam-choice ${examAnswers[takingExam.questions[activeQuestionIndex].id] === option.id ? 'selected' : ''}`}
-                          >
-                            <input
-                              type="radio"
-                              name={`question-${takingExam.questions[activeQuestionIndex].id}`}
-                              value={option.id}
-                              checked={examAnswers[takingExam.questions[activeQuestionIndex].id] === option.id}
-                              onChange={() => setExamAnswers((current) => ({
-                                ...current,
-                                [takingExam.questions[activeQuestionIndex].id]: option.id,
-                              }))}
-                            />
-                            <span className="choice-letter">{String.fromCharCode(65 + optionIndex)}</span>
-                            <span>{option.content}</span>
-                          </label>
-                        ))}
-                      </fieldset>
-                    </main>
+                    <AnimatePresence mode="wait">
+                      <motion.main
+                        key={activeQuestionIndex}
+                        className="active-exam-question"
+                        initial={{ opacity: 0, x: 18 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -18 }}
+                        transition={{ duration: 0.18, ease: 'easeOut' }}
+                      >
+                        <div className="question-kicker">
+                          <span>CÂU {activeQuestionIndex + 1}</span>
+                          <span>{takingExam.questions.length} câu</span>
+                        </div>
+                        <h3>{takingExam.questions[activeQuestionIndex].content}</h3>
+                        <fieldset className="exam-choice-list">
+                          <legend>Chọn một đáp án</legend>
+                          {takingExam.questions[activeQuestionIndex].options.map((option, optionIndex) => (
+                            <label
+                              key={option.id}
+                              className={`exam-choice ${examAnswers[takingExam.questions[activeQuestionIndex].id] === option.id ? 'selected' : ''}`}
+                            >
+                              <input
+                                type="radio"
+                                name={`question-${takingExam.questions[activeQuestionIndex].id}`}
+                                value={option.id}
+                                checked={examAnswers[takingExam.questions[activeQuestionIndex].id] === option.id}
+                                onChange={() => setExamAnswers((current) => ({
+                                  ...current,
+                                  [takingExam.questions[activeQuestionIndex].id]: option.id,
+                                }))}
+                              />
+                              <span className="choice-letter">{String.fromCharCode(65 + optionIndex)}</span>
+                              <span>{option.content}</span>
+                            </label>
+                          ))}
+                        </fieldset>
+                      </motion.main>
+                    </AnimatePresence>
                   )}
                 </div>
                 {submissionError && <p className="alert error exam-submit-error">{submissionError}</p>}

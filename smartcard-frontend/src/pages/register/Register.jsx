@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import { Sparkles } from 'lucide-react'
 import { useAuth } from '../../common/hooks/authentication/AuthProvider'
 
 export default function Register() {
@@ -26,8 +28,22 @@ export default function Register() {
   return (
     <section className="auth-page">
       <div className="auth-brand">
+        <div className="auth-orb auth-orb-1" aria-hidden="true" />
+        <div className="auth-orb auth-orb-2" aria-hidden="true" />
         <Link className="auth-home" to="/">‹ Trang chủ</Link>
-        <div><h1>Bắt đầu hành trình học tập.</h1><p>Tạo tài khoản và quản lý bộ thẻ của bạn.</p></div>
+        <div className="auth-brand-body">
+          <motion.div
+            className="auth-floating-card"
+            animate={{ y: [0, -8, 0], rotate: [2, -1, 2] }}
+            transition={{ duration: 5.5, repeat: Infinity, ease: 'easeInOut' }}
+            aria-hidden="true"
+          >
+            <span><Sparkles size={14} /> SmartCard</span>
+            <strong>Tạo bộ thẻ &amp; luyện đề AI</strong>
+          </motion.div>
+          <h1>Bắt đầu hành trình học tập.</h1>
+          <p>Tạo tài khoản và quản lý bộ thẻ của bạn.</p>
+        </div>
         <strong>SmartCard</strong>
       </div>
       <div className="auth-panel">

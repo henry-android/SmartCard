@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import { Sparkles } from 'lucide-react'
 import { useAuth } from '../../common/hooks/authentication/AuthProvider'
 
 export default function Login() {
@@ -26,8 +28,19 @@ export default function Login() {
   return (
     <section className="auth-page">
       <div className="auth-brand">
+        <div className="auth-orb auth-orb-1" aria-hidden="true" />
+        <div className="auth-orb auth-orb-2" aria-hidden="true" />
         <Link className="auth-home" to="/">‹ Trang chủ</Link>
-        <div>
+        <div className="auth-brand-body">
+          <motion.div
+            className="auth-floating-card"
+            animate={{ y: [0, -8, 0], rotate: [-2, 1, -2] }}
+            transition={{ duration: 5.5, repeat: Infinity, ease: 'easeInOut' }}
+            aria-hidden="true"
+          >
+            <span><Sparkles size={14} /> Flashcard 3D</span>
+            <strong>Ghi nhớ nhanh gấp 2 lần</strong>
+          </motion.div>
           <h1>Chinh phục mọi bộ thẻ, học mọi lúc mọi nơi.</h1>
           <p>Cách học hiệu quả nhất. Đăng ký miễn phí ngay!</p>
         </div>
